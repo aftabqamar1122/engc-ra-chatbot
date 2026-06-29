@@ -46,7 +46,11 @@ STRICT RULES:
 6. Generate minimum 8 rows
 7. Always reduce residual risk to LOW or MODERATE
 
-Return ONLY this exact JSON. No extra text. No markdown. No explanation:
+CRITICAL INSTRUCTION: Your response must start with { and end with }
+Do NOT write anything before { or after }
+Do NOT use markdown code blocks
+Do NOT write any explanation
+ONLY output raw JSON starting with { character:
 {
   "activity": "activity name",
   "project": "project name",
