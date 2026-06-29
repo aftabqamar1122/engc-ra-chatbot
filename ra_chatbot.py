@@ -280,6 +280,39 @@ def generate_docx(ra_data, project_name, topic):
     return buffer
 
 def call_claude_api(prompt, project_name):
+    client = anthropic.Anthropic(
+        api_key=os.environ.get("ANTHROPIC_API_KEY")
+    )
+    message = client.messages.create(
+        model="claude-sonnet-4-6",
+        max_tokens=4000,
+        system=SYSTEM_PROMPT,
+        messages=[{"role": "user", "content": prompt}]
+    )
+    response_text = message.content[0].text.strip()
+
+    # Remove any markdown code blocks
+    if "```json" in response_text:
+        response_text = response_text.split("```json")[1].split("```")[0].strip()
+    elif "```" in response_text:
+        response_text = response_text.split("```")[1].split("```")[0].strip()
+
+    # Extract only the JSON object
+    start = response_text.find('{')
+    end = response_text.rfind('}')
+    if start != -1 and end != -1:
+        response_text = response_text[start:end+1]
+    else:
+        raise ValueError("No JSON found in response")
+
+    # Parse and validate
+    ra_data = json.loads(response_text)
+    
+    # Make sure rows exist
+    if "rows" not in ra_data or len(ra_data["rows"]) == 0:
+        raise ValueError("No rows generated")
+        
+    return ra_data
     client = anthropic.Anthropic(api_key=os.environ.get("ANTHROPIC_API_KEY"))
     message = client.messages.create(
         model="claude-sonnet-4-6",
