@@ -33,9 +33,26 @@ Generate Risk Assessments following ADOSH-SF Version 4.0.
 Include MOHRE Resolution No. 44/2022 heat stress controls.
 Hierarchy of Controls: Elimination, Substitution, Engineering, Administrative, PPE.
 Risk = Probability x Severity. LOW=1-4, MODERATE=5-9, HIGH=10-14, EXTREME=15-25.
-Generate EXACTLY 10 rows specific to the activity requested. Analyze the activity and break it into 10 real construction steps. Each row must be a DIFFERENT specific step of that exact activity. Think like this for any activity: - Excavation: site setup, marking, breaking, shoring, dewatering, soil removal, underground services, backfill, compaction, reinstatement - Scaffolding: delivery, ground prep, base plates, standards, ledgers, transoms, boarding, handrails, ladders, inspection - Electrical: isolation, permit to work, cable routing, pulling, termination, testing, energizing, earthing, panel work, inspection - Concrete: formwork, reinforcement, delivery, pouring, compaction, curing, stripping, finishing, testing, waste - Working at Heights: equipment check, edge protection, harness, anchors, platform, tool tethering, weather, rescue plan, supervision, descent - Fire Prevention: site assessment, ignition sources, storage, detection systems, suppression, signage, evacuation, training, hot works, inspection - Chemical Handling: MSDS review, storage, PPE selection, mixing, spillage, disposal, ventilation, emergency, first aid, inspection Apply same thinking to ANY activity. Row 9 always heat stress. Row 10 always emergency response. Keep each text field under 50 words. Residual risk must be LOW or MODERATE.
 
-OUTPUT RULES - VERY IMPORTANT:
+Generate EXACTLY 10 rows specific to the activity requested.
+Analyze the activity and break it into 10 real construction steps.
+Each row must be a DIFFERENT specific step of that exact activity.
+Think like this for any activity:
+- Excavation: site setup, marking, breaking, shoring, dewatering, soil removal, underground services, backfill, compaction, reinstatement
+- Scaffolding: delivery, ground prep, base plates, standards, ledgers, transoms, boarding, handrails, ladders, inspection
+- Electrical: isolation, permit to work, cable routing, pulling, termination, testing, energizing, earthing, panel work, inspection
+- Concrete: formwork, reinforcement, delivery, pouring, compaction, curing, stripping, finishing, testing, waste
+- Working at Heights: equipment check, edge protection, harness, anchors, platform, tool tethering, weather, rescue plan, supervision, descent
+- Fire Prevention: site assessment, ignition sources, storage, detection, suppression, signage, evacuation, training, hot works, inspection
+- Chemical Handling: MSDS review, storage, PPE selection, mixing, spillage, disposal, ventilation, emergency, first aid, inspection
+- Lifting Operations: pre-lift plan, crane inspection, outrigger setup, rigging, slinging, trial lift, main lift, slewing, load landing, post-lift
+- Confined Space: risk assessment, permit to work, atmospheric testing, ventilation, entry, monitoring, communication, rescue, exit, debrief
+Apply same thinking to ANY other activity requested.
+Row 9 always = Heat Stress (MOHRE Resolution 44/2022, midday ban 12:30-15:00).
+Row 10 always = Emergency Response and First Aid.
+Keep each text field under 50 words. Residual risk must be LOW or MODERATE.
+
+OUTPUT RULES - CRITICAL:
 1. Output ONLY a JSON object
 2. Start with { and end with }
 3. Zero text before or after the JSON
@@ -56,14 +73,14 @@ JSON format:
       "sev_initial": 4,
       "risk_initial": 16,
       "risk_level_initial": "HIGH",
-      "controls": "1. Control one\n2. Control two\n3. Control three",
+      "controls": "1. Control one\n2. Control two\n3. Control three\n4. Control four\n5. PPE required",
       "prob_residual": 2,
       "sev_residual": 3,
       "risk_residual": 6,
       "risk_level_residual": "MODERATE"
     }
   ],
-  "legal_references": "references"
+  "legal_references": "ADOSH CoP references used"
 }"""
 
 
@@ -91,34 +108,42 @@ def shade_cell(cell, hex_color):
 
 
 def extract_json(text):
-    """Extract JSON from any text - handles all cases"""
     text = text.strip()
-
-    # Case 1: Remove markdown code blocks
-    if "```" in text:
-        parts = text.split("```")
-        for part in parts:
-            part = part.strip()
-            if part.startswith("json"):
-                part = part[4:].strip()
-            if part.startswith("{"):
-                text = part
-                break
-
-    # Case 2: Find first { and last }
+    if "```json" in text:
+        text = text.split("```json")[1]
+        if "```" in text:
+            text = text.split("```")[0]
+        text = text.strip()
+    elif "```" in text:
+        text = text.split("```")[1]
+        if "```" in text:
+            text = text.split("```")[0]
+        text = text.strip()
     start = text.find("{")
     end = text.rfind("}")
-    if start != -1 and end != -1 and end > start:
-        text = text[start:end + 1]
-
-    # Case 3: Parse
+    if start == -1 or end == -1:
+        raise ValueError("No JSON found")
+    text = text[start:end + 1]
     try:
         return json.loads(text)
     except json.JSONDecodeError:
-        # Case 4: Try to fix common issues
-        text = re.sub(r',\s*}', '}', text)
-        text = re.sub(r',\s*]', ']', text)
-        return json.loads(text)
+        pass
+    last = text.rfind('"}')
+    if last > 0:
+        truncated = text[:last + 2]
+        ob = truncated.count('{') - truncated.count('}')
+        ob2 = truncated.count('[') - truncated.count(']')
+        if ob2 > 0:
+            truncated += ']' * ob2
+        if ob > 0:
+            truncated += '}' * ob
+        try:
+            return json.loads(truncated)
+        except json.JSONDecodeError:
+            pass
+    text = re.sub(r',\s*}', '}', text)
+    text = re.sub(r',\s*]', ']', text)
+    return json.loads(text)
 
 
 def read_pdf_file(uploaded_file):
@@ -156,7 +181,6 @@ def generate_docx(ra_data, project_name, topic):
     section.top_margin = Cm(1.27)
     section.bottom_margin = Cm(1.27)
 
-    # Title
     p = doc.add_paragraph()
     p.alignment = WD_ALIGN_PARAGRAPH.CENTER
     r = p.add_run("RISK ASSESSMENT")
@@ -164,15 +188,15 @@ def generate_docx(ra_data, project_name, topic):
     r.font.size = Pt(14)
     r.font.name = "Calibri"
 
-    # Info block
     t = doc.add_table(rows=4, cols=2)
     t.style = "Table Grid"
-    for i, (lbl, val) in enumerate([
+    info_rows = [
         ("Entity Name:", "Exeed National General Contracting LLC (ENGC)"),
         ("Project:", project_name),
         ("Activity:", topic),
         ("Date:", date.today().strftime("%d-%b-%Y")),
-    ]):
+    ]
+    for i, (lbl, val) in enumerate(info_rows):
         t.rows[i].cells[0].text = lbl
         t.rows[i].cells[1].text = val
         shade_cell(t.rows[i].cells[0], "C0C0C0")
@@ -184,21 +208,23 @@ def generate_docx(ra_data, project_name, topic):
 
     doc.add_paragraph()
 
-    # Main RA table
     tbl = doc.add_table(rows=2, cols=14)
     tbl.style = "Table Grid"
 
-    # Header row 1 - merge risk classification columns
     h1 = tbl.rows[0]
     h1.cells[5].merge(h1.cells[7])
     h1.cells[10].merge(h1.cells[12])
 
     header1 = {
-        0: "S/N", 1: "Activity Element", 2: "Hazards / Impact",
+        0: "S/N",
+        1: "Activity Element",
+        2: "Hazards / Impact",
         3: "Risk & Potential Consequences",
         4: "Who Might Be Harmed and How?",
-        5: "Risk Classification", 8: "Initial Risk Level",
-        9: "Controls", 10: "Revised Risk Classification",
+        5: "Risk Classification",
+        8: "Initial Risk Level",
+        9: "Controls",
+        10: "Revised Risk Classification",
         13: "Residual Risk Level"
     }
     for idx, txt in header1.items():
@@ -213,7 +239,6 @@ def generate_docx(ra_data, project_name, topic):
                 run.font.name = "Calibri"
         c.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
-    # Header row 2 - P S R subheaders
     h2 = tbl.rows[1]
     sub = {5: "P", 6: "S", 7: "R\nPxS", 10: "P", 11: "S", 12: "R\nPxS"}
     for idx in range(14):
@@ -228,7 +253,6 @@ def generate_docx(ra_data, project_name, topic):
                 run.font.name = "Calibri"
         c.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
-    # Data rows
     for item in ra_data.get("rows", []):
         row = tbl.add_row()
         vals = {
@@ -254,13 +278,11 @@ def generate_docx(ra_data, project_name, topic):
                 for run in para.runs:
                     run.font.size = Pt(8)
                     run.font.name = "Calibri"
-
         shade_cell(row.cells[8],
                    get_risk_color(item.get("risk_level_initial", "LOW")))
         shade_cell(row.cells[13],
                    get_risk_color(item.get("risk_level_residual", "LOW")))
 
-    # Signature block
     doc.add_paragraph()
     sig = doc.add_table(rows=2, cols=3)
     sig.style = "Table Grid"
@@ -274,8 +296,10 @@ def generate_docx(ra_data, project_name, topic):
                 run.font.name = "Calibri"
     for i, d in enumerate(["HSE Engineer", "HSE Manager", "Project Manager"]):
         sig.rows[1].cells[i].text = (
-            f"Name: _______________\nDesignation: {d}\n"
-            f"Date: ____________\nSignature: ________"
+            "Name: _______________\n"
+            "Designation: " + d + "\n"
+            "Date: ____________\n"
+            "Signature: ________"
         )
         for para in sig.rows[1].cells[i].paragraphs:
             for run in para.runs:
@@ -288,20 +312,45 @@ def generate_docx(ra_data, project_name, topic):
     return buf
 
 
-def call_api_and_show(                     f"Generate Risk Assessment for: {user_input}
-"                     f"Project: {project_name}
-"                     f"Location: Abu Dhabi UAE
-"                     f"Season: Summer.
-"                     f"INSTRUCTIONS:
-"                     f"1. Break '{user_input}' into exactly 10 specific steps
-"                     f"2. Every row must be unique and specific to '{user_input}'
-"                     f"3. No generic rows - only steps that belong to '{user_input}'
-"                     f"4. Row 9 = Heat Stress (MOHRE Resolution 44/2022)
-"                     f"5. Row 10 = Emergency Response
-"                     f"6. Keep all text fields under 50 words",                     project_name, user_input                 )(prompt, project_name, topic):
-    """Call API, parse response, show results"""
+def build_prompt(activity, project):
+    return (
+        "Generate Risk Assessment for the following construction activity.\n"
+        "Activity: " + activity + "\n"
+        "Project: " + project + "\n"
+        "Location: Abu Dhabi UAE\n"
+        "Season: Summer\n"
+        "INSTRUCTIONS:\n"
+        "1. Break the activity into exactly 10 specific construction steps\n"
+        "2. Every row must be unique and specific to the activity\n"
+        "3. No generic rows - only steps that belong to this specific activity\n"
+        "4. Row 9 must be Heat Stress - MOHRE Resolution 44/2022 midday ban\n"
+        "5. Row 10 must be Emergency Response and First Aid\n"
+        "6. Keep all text fields under 50 words each"
+    )
+
+
+def build_file_prompt(activity, project, file_text, extra):
+    prompt = (
+        "Analyze this document and generate a Risk Assessment.\n"
+        "Activity: " + activity + "\n"
+        "Project: " + project + "\n"
+        "Location: Abu Dhabi UAE\n"
+        "Season: Summer\n"
+        "INSTRUCTIONS:\n"
+        "1. Extract all activities from the document\n"
+        "2. Generate 10 specific rows based on document content\n"
+        "3. Row 9 must be Heat Stress\n"
+        "4. Row 10 must be Emergency Response\n"
+        "5. Keep all text fields under 50 words\n"
+        "Document content:\n" + file_text
+    )
+    if extra:
+        prompt += "\nAdditional instructions: " + extra
+    return prompt
+
+
+def call_api_and_show(prompt, project_name, topic):
     try:
-        # Call API
         client = anthropic.Anthropic(
             api_key=os.environ.get("ANTHROPIC_API_KEY")
         )
@@ -313,34 +362,31 @@ def call_api_and_show(                     f"Generate Risk Assessment for: {user
         )
         raw = msg.content[0].text
 
-        # Show raw response in expander for debugging
         with st.expander("🔍 Debug - Raw API Response"):
             st.text(raw[:500])
 
-        # Extract JSON - bulletproof method
         ra_data = extract_json(raw)
 
         if "rows" not in ra_data or len(ra_data["rows"]) == 0:
             st.error("No rows generated. Please try again.")
             return
 
-        # Show success
-        st.success(f"✅ Generated {len(ra_data['rows'])} activity rows!")
+        st.success("✅ Generated " + str(len(ra_data["rows"])) + " activity rows!")
 
-        # Preview table
-        preview = [{
-            "S/N": r.get("sn", ""),
-            "Activity": str(r.get("activity_element", ""))[:40],
-            "Hazard": str(r.get("hazards", ""))[:30] + "...",
-            "Initial": f"{r.get('risk_level_initial','')}({r.get('risk_initial','')})",
-            "Residual": f"{r.get('risk_level_residual','')}({r.get('risk_residual','')})"
-        } for r in ra_data["rows"]]
+        preview = []
+        for r in ra_data["rows"]:
+            preview.append({
+                "S/N": r.get("sn", ""),
+                "Activity": str(r.get("activity_element", ""))[:40],
+                "Hazard": str(r.get("hazards", ""))[:30] + "...",
+                "Initial": str(r.get("risk_level_initial", "")) + "(" + str(r.get("risk_initial", "")) + ")",
+                "Residual": str(r.get("risk_level_residual", "")) + "(" + str(r.get("risk_residual", "")) + ")"
+            })
         st.dataframe(preview, use_container_width=True)
 
-        # Generate and offer DOCX
         try:
             buf = generate_docx(ra_data, project_name, topic)
-            fname = f"ENGC_RA_{topic.replace(' ','_')}_{date.today().strftime('%d%b%Y')}.docx"
+            fname = "ENGC_RA_" + topic.replace(" ", "_") + "_" + date.today().strftime("%d%b%Y") + ".docx"
             st.download_button(
                 label="⬇️ Download Risk Assessment (DOCX)",
                 data=buf,
@@ -350,11 +396,11 @@ def call_api_and_show(                     f"Generate Risk Assessment for: {user
             )
             st.success("✅ Click the button above to download your DOCX!")
         except Exception as de:
-            st.error(f"DOCX error: {de}")
+            st.error("DOCX error: " + str(de))
             st.download_button(
                 "⬇️ Download JSON (backup)",
                 data=json.dumps(ra_data, indent=2),
-                file_name=f"RA_{topic}.json",
+                file_name="RA_" + topic + ".json",
                 mime="application/json",
                 use_container_width=True
             )
@@ -364,12 +410,12 @@ def call_api_and_show(                     f"Generate Risk Assessment for: {user
                 st.write(ra_data["legal_references"])
 
     except json.JSONDecodeError as je:
-        st.error(f"⚠️ JSON parse error: {je}")
-        st.info("👉 Please click Generate again — usually works on retry.")
+        st.error("JSON parse error: " + str(je))
+        st.info("Please click Generate again — usually works on retry.")
     except Exception as e:
-        st.error(f"❌ Error: {e}")
+        st.error("Error: " + str(e))
         if "api_key" in str(e).lower() or "auth" in str(e).lower():
-            st.warning("🔑 Check your API key in Streamlit Secrets!")
+            st.warning("Check your API key in Streamlit Secrets!")
 
 
 # ── SIDEBAR ──
@@ -389,7 +435,7 @@ with st.sidebar:
         "Heat Stress Management", "Night Shift Work", "Chemical Handling",
         "Scaffolding Erection", "Concrete Works", "Lifting Operations"
     ]:
-        if st.button(f"📄 {topic}", key=f"q_{topic}",
+        if st.button("📄 " + topic, key="q_" + topic,
                      use_container_width=True):
             st.session_state.quick_input = topic
 
@@ -401,36 +447,25 @@ with tab1:
     user_input = st.text_input(
         "🔍 Enter Activity / Topic:",
         value=st.session_state.get("quick_input", ""),
-        placeholder="e.g. Lifting Operations, Scaffolding Erection..."
+        placeholder="e.g. Excavation Works, Scaffolding Erection..."
     )
     if st.button("🚀 Generate Risk Assessment", type="primary",
                  use_container_width=True, key="g1"):
         if not user_input.strip():
             st.warning("Please enter a topic first.")
         else:
-            with st.spinner(f"⏳ Generating RA for: {user_input}..."):
-                call_api_and_show(                     f"Generate Risk Assessment for: {user_input}
-"                     f"Project: {project_name}
-"                     f"Location: Abu Dhabi UAE
-"                     f"Season: Summer.
-"                     f"INSTRUCTIONS:
-"                     f"1. Break '{user_input}' into exactly 10 specific steps
-"                     f"2. Every row must be unique and specific to '{user_input}'
-"                     f"3. No generic rows - only steps that belong to '{user_input}'
-"                     f"4. Row 9 = Heat Stress (MOHRE Resolution 44/2022)
-"                     f"5. Row 10 = Emergency Response
-"                     f"6. Keep all text fields under 50 words",                     project_name, user_input                 )(
-                    f"Generate Risk Assessment for: {user_input}\n"
-                    f"Project: {project_name}\nLocation: Abu Dhabi UAE\n"
-                    f"Season: Summer. Include heat stress controls.",
-                    project_name, user_input
+            with st.spinner("⏳ Generating RA for: " + user_input + "..."):
+                call_api_and_show(
+                    build_prompt(user_input, project_name),
+                    project_name,
+                    user_input
                 )
 
 with tab2:
     st.info("Upload PDF or DOCX → Bot reads it → Generates RA")
     uf = st.file_uploader("Choose file:", type=["pdf", "docx", "doc"])
     if uf:
-        st.success(f"✅ {uf.name} ({len(uf.getvalue())/1024:.1f} KB)")
+        st.success("✅ " + uf.name + " (" + str(round(len(uf.getvalue())/1024, 1)) + " KB)")
         extra = st.text_area("Extra instructions:", height=60)
         if st.button("🚀 Generate RA from File", type="primary",
                      use_container_width=True, key="g2"):
@@ -444,24 +479,14 @@ with tab2:
                     st.error(txt)
                 else:
                     tname = uf.name.rsplit(".", 1)[0].replace("_", " ")
-                    call_api_and_show(                     f"Generate Risk Assessment for: {user_input}
-"                     f"Project: {project_name}
-"                     f"Location: Abu Dhabi UAE
-"                     f"Season: Summer.
-"                     f"INSTRUCTIONS:
-"                     f"1. Break '{user_input}' into exactly 10 specific steps
-"                     f"2. Every row must be unique and specific to '{user_input}'
-"                     f"3. No generic rows - only steps that belong to '{user_input}'
-"                     f"4. Row 9 = Heat Stress (MOHRE Resolution 44/2022)
-"                     f"5. Row 10 = Emergency Response
-"                     f"6. Keep all text fields under 50 words",                     project_name, user_input                 )(
-                        f"Generate Risk Assessment from this document.\n"
-                        f"Project: {project_name}\nLocation: Abu Dhabi UAE\n"
-                        f"Season: Summer.\nDocument:\n{txt}\n"
-                        f"{'Instructions: '+extra if extra else ''}",
-                        project_name, tname
+                    call_api_and_show(
+                        build_file_prompt(tname, project_name, txt, extra),
+                        project_name,
+                        tname
                     )
 
 st.markdown("---")
-st.caption("⚠️ AI output must be reviewed by a competent HSE professional. "
-           "| ADOSH-SF Version 4.0 | © ENGC 2026")
+st.caption(
+    "⚠️ AI output must be reviewed by a competent HSE professional. "
+    "| ADOSH-SF Version 4.0 | © ENGC 2026"
+)
