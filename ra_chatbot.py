@@ -288,7 +288,17 @@ def generate_docx(ra_data, project_name, topic):
     return buf
 
 
-def call_api_and_show(prompt, project_name, topic):
+def call_api_and_show(                     f"Generate Risk Assessment for: {user_input}
+"                     f"Project: {project_name}
+"                     f"Location: Abu Dhabi UAE
+"                     f"Season: Summer.
+"                     f"INSTRUCTIONS:
+"                     f"1. Break '{user_input}' into exactly 10 specific steps
+"                     f"2. Every row must be unique and specific to '{user_input}'
+"                     f"3. No generic rows - only steps that belong to '{user_input}'
+"                     f"4. Row 9 = Heat Stress (MOHRE Resolution 44/2022)
+"                     f"5. Row 10 = Emergency Response
+"                     f"6. Keep all text fields under 50 words",                     project_name, user_input                 )(prompt, project_name, topic):
     """Call API, parse response, show results"""
     try:
         # Call API
@@ -399,7 +409,17 @@ with tab1:
             st.warning("Please enter a topic first.")
         else:
             with st.spinner(f"⏳ Generating RA for: {user_input}..."):
-                call_api_and_show(
+                call_api_and_show(                     f"Generate Risk Assessment for: {user_input}
+"                     f"Project: {project_name}
+"                     f"Location: Abu Dhabi UAE
+"                     f"Season: Summer.
+"                     f"INSTRUCTIONS:
+"                     f"1. Break '{user_input}' into exactly 10 specific steps
+"                     f"2. Every row must be unique and specific to '{user_input}'
+"                     f"3. No generic rows - only steps that belong to '{user_input}'
+"                     f"4. Row 9 = Heat Stress (MOHRE Resolution 44/2022)
+"                     f"5. Row 10 = Emergency Response
+"                     f"6. Keep all text fields under 50 words",                     project_name, user_input                 )(
                     f"Generate Risk Assessment for: {user_input}\n"
                     f"Project: {project_name}\nLocation: Abu Dhabi UAE\n"
                     f"Season: Summer. Include heat stress controls.",
@@ -424,7 +444,17 @@ with tab2:
                     st.error(txt)
                 else:
                     tname = uf.name.rsplit(".", 1)[0].replace("_", " ")
-                    call_api_and_show(
+                    call_api_and_show(                     f"Generate Risk Assessment for: {user_input}
+"                     f"Project: {project_name}
+"                     f"Location: Abu Dhabi UAE
+"                     f"Season: Summer.
+"                     f"INSTRUCTIONS:
+"                     f"1. Break '{user_input}' into exactly 10 specific steps
+"                     f"2. Every row must be unique and specific to '{user_input}'
+"                     f"3. No generic rows - only steps that belong to '{user_input}'
+"                     f"4. Row 9 = Heat Stress (MOHRE Resolution 44/2022)
+"                     f"5. Row 10 = Emergency Response
+"                     f"6. Keep all text fields under 50 words",                     project_name, user_input                 )(
                         f"Generate Risk Assessment from this document.\n"
                         f"Project: {project_name}\nLocation: Abu Dhabi UAE\n"
                         f"Season: Summer.\nDocument:\n{txt}\n"
