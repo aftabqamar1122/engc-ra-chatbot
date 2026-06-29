@@ -33,7 +33,7 @@ Generate Risk Assessments following ADOSH-SF Version 4.0.
 Include MOHRE Resolution No. 44/2022 heat stress controls.
 Hierarchy of Controls: Elimination, Substitution, Engineering, Administrative, PPE.
 Risk = Probability x Severity. LOW=1-4, MODERATE=5-9, HIGH=10-14, EXTREME=15-25.
-Generate minimum 8 rows. Reduce residual risk to LOW or MODERATE.
+Generate EXACTLY 6 rows only - not more. Keep every text field under 60 words. Short and concise answers only. Residual risk must be LOW or MODERATE.
 
 OUTPUT RULES - VERY IMPORTANT:
 1. Output ONLY a JSON object
