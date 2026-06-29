@@ -3,6 +3,7 @@ import anthropic
 import os
 import json
 import io
+import re
 from datetime import date
 from docx import Document
 from docx.shared import Pt, Cm
@@ -28,45 +29,41 @@ st.caption("Exeed National General Contracting LLC | Bloom Living Projects | Abu
 st.markdown("---")
 
 SYSTEM_PROMPT = """You are ADOSH Risk Bot for ENGC Abu Dhabi UAE.
-
-Generate Risk Assessments following ADOSH-SF Version 4.0 and Abu Dhabi CoP.
-Always include MOHRE Resolution No. 44/2022 heat stress controls.
+Generate Risk Assessments following ADOSH-SF Version 4.0.
+Include MOHRE Resolution No. 44/2022 heat stress controls.
 Hierarchy of Controls: Elimination, Substitution, Engineering, Administrative, PPE.
 Risk = Probability x Severity. LOW=1-4, MODERATE=5-9, HIGH=10-14, EXTREME=15-25.
-Generate minimum 8 rows. Reduce residual risk to LOW or MODERATE always.
+Generate minimum 8 rows. Reduce residual risk to LOW or MODERATE.
 
-YOUR RESPONSE MUST FOLLOW THESE RULES:
-- Start your response with { character
-- End your response with } character
-- Do not write anything before {
-- Do not write anything after }
-- Do not use markdown or code blocks
-- Do not write any explanation or introduction
-- Output raw JSON only
+OUTPUT RULES - VERY IMPORTANT:
+1. Output ONLY a JSON object
+2. Start with { and end with }
+3. Zero text before or after the JSON
+4. No markdown, no code blocks, no explanation
 
-Use exactly this JSON structure:
+JSON format:
 {
-  "activity": "activity name here",
-  "project": "project name here",
+  "activity": "name",
+  "project": "name",
   "rows": [
     {
       "sn": 1,
-      "activity_element": "specific activity step",
-      "hazards": "hazard identified",
-      "consequences": "risk and potential consequences",
-      "who_harmed": "who is harmed and exactly how they are harmed",
+      "activity_element": "step",
+      "hazards": "hazard",
+      "consequences": "consequences",
+      "who_harmed": "who and how",
       "prob_initial": 4,
       "sev_initial": 4,
       "risk_initial": 16,
       "risk_level_initial": "HIGH",
-      "controls": "1. Elimination measure\n2. Substitution\n3. Engineering control\n4. Administrative control with ADOSH CoP reference\n5. PPE required",
+      "controls": "1. Control one\n2. Control two\n3. Control three",
       "prob_residual": 2,
       "sev_residual": 3,
       "risk_residual": 6,
       "risk_level_residual": "MODERATE"
     }
   ],
-  "legal_references": "List of ADOSH CoP references used"
+  "legal_references": "references"
 }"""
 
 
@@ -93,45 +90,58 @@ def shade_cell(cell, hex_color):
         pass
 
 
+def extract_json(text):
+    """Extract JSON from any text - handles all cases"""
+    text = text.strip()
+
+    # Case 1: Remove markdown code blocks
+    if "```" in text:
+        parts = text.split("```")
+        for part in parts:
+            part = part.strip()
+            if part.startswith("json"):
+                part = part[4:].strip()
+            if part.startswith("{"):
+                text = part
+                break
+
+    # Case 2: Find first { and last }
+    start = text.find("{")
+    end = text.rfind("}")
+    if start != -1 and end != -1 and end > start:
+        text = text[start:end + 1]
+
+    # Case 3: Parse
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        # Case 4: Try to fix common issues
+        text = re.sub(r',\s*}', '}', text)
+        text = re.sub(r',\s*]', ']', text)
+        return json.loads(text)
+
+
 def read_pdf_file(uploaded_file):
     if not PDF_SUPPORT:
-        return "PDF reading not available - PyMuPDF not installed", 0
+        return "PDF not supported", 0
     try:
         pdf_bytes = uploaded_file.read()
         pdf_doc = fitz.open(stream=pdf_bytes, filetype="pdf")
-        extracted_text = ""
-        total_pages = len(pdf_doc)
-        for page_num in range(total_pages):
-            page = pdf_doc[page_num]
-            extracted_text += f"\n--- Page {page_num + 1} ---\n{page.get_text()}"
+        text = ""
+        pages = len(pdf_doc)
+        for i in range(pages):
+            text += f"\n--- Page {i+1} ---\n{pdf_doc[i].get_text()}"
         pdf_doc.close()
-        if len(extracted_text) > 8000:
-            extracted_text = extracted_text[:8000] + "\n[Truncated]"
-        return extracted_text, total_pages
+        return text[:8000], pages
     except Exception as e:
         return f"ERROR: {str(e)}", 0
 
 
 def read_docx_file(uploaded_file):
     try:
-        docx_bytes = io.BytesIO(uploaded_file.read())
-        doc = Document(docx_bytes)
-        extracted_text = ""
-        for para in doc.paragraphs:
-            if para.text.strip():
-                extracted_text += para.text + "\n"
-        for table in doc.tables:
-            for row in table.rows:
-                row_text = " | ".join(
-                    cell.text.strip()
-                    for cell in row.cells
-                    if cell.text.strip()
-                )
-                if row_text:
-                    extracted_text += row_text + "\n"
-        if len(extracted_text) > 8000:
-            extracted_text = extracted_text[:8000] + "\n[Truncated]"
-        return extracted_text, len(doc.paragraphs)
+        doc = Document(io.BytesIO(uploaded_file.read()))
+        text = "\n".join(p.text for p in doc.paragraphs if p.text.strip())
+        return text[:8000], len(doc.paragraphs)
     except Exception as e:
         return f"ERROR: {str(e)}", 0
 
@@ -146,82 +156,82 @@ def generate_docx(ra_data, project_name, topic):
     section.top_margin = Cm(1.27)
     section.bottom_margin = Cm(1.27)
 
-    title = doc.add_paragraph()
-    title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-    run = title.add_run("RISK ASSESSMENT")
-    run.bold = True
-    run.font.size = Pt(14)
-    run.font.name = "Calibri"
+    # Title
+    p = doc.add_paragraph()
+    p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    r = p.add_run("RISK ASSESSMENT")
+    r.bold = True
+    r.font.size = Pt(14)
+    r.font.name = "Calibri"
 
-    info_table = doc.add_table(rows=4, cols=2)
-    info_table.style = "Table Grid"
-    info_data = [
+    # Info block
+    t = doc.add_table(rows=4, cols=2)
+    t.style = "Table Grid"
+    for i, (lbl, val) in enumerate([
         ("Entity Name:", "Exeed National General Contracting LLC (ENGC)"),
         ("Project:", project_name),
         ("Activity:", topic),
         ("Date:", date.today().strftime("%d-%b-%Y")),
-    ]
-    for i, (label, value) in enumerate(info_data):
-        info_table.rows[i].cells[0].text = label
-        info_table.rows[i].cells[1].text = value
-        shade_cell(info_table.rows[i].cells[0], "C0C0C0")
-        for cell in info_table.rows[i].cells:
+    ]):
+        t.rows[i].cells[0].text = lbl
+        t.rows[i].cells[1].text = val
+        shade_cell(t.rows[i].cells[0], "C0C0C0")
+        for cell in t.rows[i].cells:
             for para in cell.paragraphs:
-                for r in para.runs:
-                    r.font.size = Pt(9)
-                    r.font.name = "Calibri"
+                for run in para.runs:
+                    run.font.size = Pt(9)
+                    run.font.name = "Calibri"
 
     doc.add_paragraph()
 
-    table = doc.add_table(rows=2, cols=14)
-    table.style = "Table Grid"
+    # Main RA table
+    tbl = doc.add_table(rows=2, cols=14)
+    tbl.style = "Table Grid"
 
-    hdr1 = table.rows[0]
-    hdr1.cells[5].merge(hdr1.cells[7])
-    hdr1.cells[10].merge(hdr1.cells[12])
+    # Header row 1 - merge risk classification columns
+    h1 = tbl.rows[0]
+    h1.cells[5].merge(h1.cells[7])
+    h1.cells[10].merge(h1.cells[12])
 
-    h1 = {
-        0: "S/N",
-        1: "Activity Element",
-        2: "Hazards / Impact",
+    header1 = {
+        0: "S/N", 1: "Activity Element", 2: "Hazards / Impact",
         3: "Risk & Potential Consequences",
         4: "Who Might Be Harmed and How?",
-        5: "Risk Classification",
-        8: "Initial Risk Level",
-        9: "Controls",
-        10: "Revised Risk Classification",
-        13: "Residual Risk Level",
+        5: "Risk Classification", 8: "Initial Risk Level",
+        9: "Controls", 10: "Revised Risk Classification",
+        13: "Residual Risk Level"
     }
-    for col_idx, text in h1.items():
-        cell = hdr1.cells[col_idx]
-        cell.text = text
-        shade_cell(cell, "C0C0C0")
-        for para in cell.paragraphs:
+    for idx, txt in header1.items():
+        c = h1.cells[idx]
+        c.text = txt
+        shade_cell(c, "C0C0C0")
+        for para in c.paragraphs:
             para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            for r in para.runs:
-                r.bold = True
-                r.font.size = Pt(8)
-                r.font.name = "Calibri"
-        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            for run in para.runs:
+                run.bold = True
+                run.font.size = Pt(8)
+                run.font.name = "Calibri"
+        c.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
-    hdr2 = table.rows[1]
-    h2 = {5: "P", 6: "S", 7: "R\nPxS", 10: "P", 11: "S", 12: "R\nPxS"}
-    for col_idx in range(14):
-        cell = hdr2.cells[col_idx]
-        cell.text = h2.get(col_idx, "")
-        shade_cell(cell, "BFBFBF")
-        for para in cell.paragraphs:
+    # Header row 2 - P S R subheaders
+    h2 = tbl.rows[1]
+    sub = {5: "P", 6: "S", 7: "R\nPxS", 10: "P", 11: "S", 12: "R\nPxS"}
+    for idx in range(14):
+        c = h2.cells[idx]
+        c.text = sub.get(idx, "")
+        shade_cell(c, "BFBFBF")
+        for para in c.paragraphs:
             para.alignment = WD_ALIGN_PARAGRAPH.CENTER
-            for r in para.runs:
-                r.bold = True
-                r.font.size = Pt(8)
-                r.font.name = "Calibri"
-        cell.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            for run in para.runs:
+                run.bold = True
+                run.font.size = Pt(8)
+                run.font.name = "Calibri"
+        c.vertical_alignment = WD_ALIGN_VERTICAL.CENTER
 
+    # Data rows
     for item in ra_data.get("rows", []):
-        row = table.add_row()
-        cells = row.cells
-        data_map = {
+        row = tbl.add_row()
+        vals = {
             0: str(item.get("sn", "")),
             1: str(item.get("activity_element", "")),
             2: str(item.get("hazards", "")),
@@ -237,276 +247,191 @@ def generate_docx(ra_data, project_name, topic):
             12: str(item.get("risk_residual", "")),
             13: str(item.get("risk_level_residual", "")),
         }
-        for col_idx, text in data_map.items():
-            cells[col_idx].text = text
-            cells[col_idx].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
-            for para in cells[col_idx].paragraphs:
-                for r in para.runs:
-                    r.font.size = Pt(8)
-                    r.font.name = "Calibri"
+        for idx, val in vals.items():
+            row.cells[idx].text = val
+            row.cells[idx].vertical_alignment = WD_ALIGN_VERTICAL.CENTER
+            for para in row.cells[idx].paragraphs:
+                for run in para.runs:
+                    run.font.size = Pt(8)
+                    run.font.name = "Calibri"
 
-        shade_cell(
-            cells[8],
-            get_risk_color(item.get("risk_level_initial", "LOW"))
-        )
-        shade_cell(
-            cells[13],
-            get_risk_color(item.get("risk_level_residual", "LOW"))
-        )
+        shade_cell(row.cells[8],
+                   get_risk_color(item.get("risk_level_initial", "LOW")))
+        shade_cell(row.cells[13],
+                   get_risk_color(item.get("risk_level_residual", "LOW")))
 
+    # Signature block
     doc.add_paragraph()
     sig = doc.add_table(rows=2, cols=3)
     sig.style = "Table Grid"
-    for i, label in enumerate(["Prepared By:", "Reviewed By:", "Approved By:"]):
-        sig.rows[0].cells[i].text = label
+    for i, lbl in enumerate(["Prepared By:", "Reviewed By:", "Approved By:"]):
+        sig.rows[0].cells[i].text = lbl
         shade_cell(sig.rows[0].cells[i], "C0C0C0")
         for para in sig.rows[0].cells[i].paragraphs:
-            for r in para.runs:
-                r.bold = True
-                r.font.size = Pt(9)
-                r.font.name = "Calibri"
-    for i, desig in enumerate(["HSE Engineer", "HSE Manager", "Project Manager"]):
+            for run in para.runs:
+                run.bold = True
+                run.font.size = Pt(9)
+                run.font.name = "Calibri"
+    for i, d in enumerate(["HSE Engineer", "HSE Manager", "Project Manager"]):
         sig.rows[1].cells[i].text = (
-            f"Name: _______________\n"
-            f"Designation: {desig}\n"
-            f"Date: ____________\n"
-            f"Signature: ________"
+            f"Name: _______________\nDesignation: {d}\n"
+            f"Date: ____________\nSignature: ________"
         )
         for para in sig.rows[1].cells[i].paragraphs:
-            for r in para.runs:
-                r.font.size = Pt(8)
-                r.font.name = "Calibri"
+            for run in para.runs:
+                run.font.size = Pt(8)
+                run.font.name = "Calibri"
 
-    buffer = io.BytesIO()
-    doc.save(buffer)
-    buffer.seek(0)
-    return buffer
-
-
-def call_claude_api(prompt):
-    client = anthropic.Anthropic(
-        api_key=os.environ.get("ANTHROPIC_API_KEY")
-    )
-    message = client.messages.create(
-        model="claude-sonnet-4-6",
-        max_tokens=4000,
-        system=SYSTEM_PROMPT,
-        messages=[{"role": "user", "content": prompt}]
-    )
-    response_text = message.content[0].text.strip()
-
-    # Remove markdown if present
-    if "```json" in response_text:
-        response_text = response_text.split("```json")[1].split("```")[0].strip()
-    elif "```" in response_text:
-        response_text = response_text.split("```")[1].split("```")[0].strip()
-
-    # Extract JSON object only
-    start = response_text.find("{")
-    end = response_text.rfind("}")
-    if start != -1 and end != -1:
-        response_text = response_text[start:end + 1]
-    else:
-        raise ValueError("No valid JSON found in response")
-
-    ra_data = json.loads(response_text)
-
-    if "rows" not in ra_data or len(ra_data["rows"]) == 0:
-        raise ValueError("No rows generated in response")
-
-    return ra_data
+    buf = io.BytesIO()
+    doc.save(buf)
+    buf.seek(0)
+    return buf
 
 
-def show_results(ra_data, project_name, topic):
-    st.success(f"✅ Generated {len(ra_data['rows'])} activity rows!")
-
-    preview = []
-    for row in ra_data["rows"]:
-        preview.append({
-            "S/N": row.get("sn", ""),
-            "Activity": str(row.get("activity_element", ""))[:45],
-            "Hazard": str(row.get("hazards", ""))[:35] + "...",
-            "Initial Risk": (
-                f"{row.get('risk_level_initial', '')} "
-                f"({row.get('risk_initial', '')})"
-            ),
-            "Residual Risk": (
-                f"{row.get('risk_level_residual', '')} "
-                f"({row.get('risk_residual', '')})"
-            ),
-        })
-    st.dataframe(preview, use_container_width=True)
-
+def call_api_and_show(prompt, project_name, topic):
+    """Call API, parse response, show results"""
     try:
-        docx_buffer = generate_docx(ra_data, project_name, topic)
-        filename = (
-            f"ENGC_RA_{topic.replace(' ', '_')}"
-            f"_{date.today().strftime('%d%b%Y')}.docx"
+        # Call API
+        client = anthropic.Anthropic(
+            api_key=os.environ.get("ANTHROPIC_API_KEY")
         )
-        st.download_button(
-            label="⬇️ Download Risk Assessment (DOCX)",
-            data=docx_buffer,
-            file_name=filename,
-            mime=(
-                "application/vnd.openxmlformats-"
-                "officedocument.wordprocessingml.document"
-            ),
-            use_container_width=True,
+        msg = client.messages.create(
+            model="claude-sonnet-4-6",
+            max_tokens=4000,
+            system=SYSTEM_PROMPT,
+            messages=[{"role": "user", "content": prompt}]
         )
-        st.success("✅ DOCX ready — click Download button above!")
+        raw = msg.content[0].text
 
+        # Show raw response in expander for debugging
+        with st.expander("🔍 Debug - Raw API Response"):
+            st.text(raw[:500])
+
+        # Extract JSON - bulletproof method
+        ra_data = extract_json(raw)
+
+        if "rows" not in ra_data or len(ra_data["rows"]) == 0:
+            st.error("No rows generated. Please try again.")
+            return
+
+        # Show success
+        st.success(f"✅ Generated {len(ra_data['rows'])} activity rows!")
+
+        # Preview table
+        preview = [{
+            "S/N": r.get("sn", ""),
+            "Activity": str(r.get("activity_element", ""))[:40],
+            "Hazard": str(r.get("hazards", ""))[:30] + "...",
+            "Initial": f"{r.get('risk_level_initial','')}({r.get('risk_initial','')})",
+            "Residual": f"{r.get('risk_level_residual','')}({r.get('risk_residual','')})"
+        } for r in ra_data["rows"]]
+        st.dataframe(preview, use_container_width=True)
+
+        # Generate and offer DOCX
+        try:
+            buf = generate_docx(ra_data, project_name, topic)
+            fname = f"ENGC_RA_{topic.replace(' ','_')}_{date.today().strftime('%d%b%Y')}.docx"
+            st.download_button(
+                label="⬇️ Download Risk Assessment (DOCX)",
+                data=buf,
+                file_name=fname,
+                mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                use_container_width=True
+            )
+            st.success("✅ Click the button above to download your DOCX!")
+        except Exception as de:
+            st.error(f"DOCX error: {de}")
+            st.download_button(
+                "⬇️ Download JSON (backup)",
+                data=json.dumps(ra_data, indent=2),
+                file_name=f"RA_{topic}.json",
+                mime="application/json",
+                use_container_width=True
+            )
+
+        if ra_data.get("legal_references"):
+            with st.expander("📚 Legal References"):
+                st.write(ra_data["legal_references"])
+
+    except json.JSONDecodeError as je:
+        st.error(f"⚠️ JSON parse error: {je}")
+        st.info("👉 Please click Generate again — usually works on retry.")
     except Exception as e:
-        st.error(f"❌ DOCX error: {str(e)}")
-        st.download_button(
-            label="⬇️ Download Raw JSON (backup)",
-            data=json.dumps(ra_data, indent=2),
-            file_name=f"RA_{topic}_{date.today()}.json",
-            mime="application/json",
-            use_container_width=True,
-        )
-
-    if ra_data.get("legal_references"):
-        with st.expander("📚 Legal References Used"):
-            st.write(ra_data["legal_references"])
+        st.error(f"❌ Error: {e}")
+        if "api_key" in str(e).lower() or "auth" in str(e).lower():
+            st.warning("🔑 Check your API key in Streamlit Secrets!")
 
 
 # ── SIDEBAR ──
 with st.sidebar:
     st.markdown("### ⚙️ Settings")
-    project_name = st.selectbox(
-        "Select Project:",
-        [
-            "Bloom Living – Almeria (Residential Villas)",
-            "Bloom Living – Cordoba Community Center",
-            "Bloom Living – Toledo Community Center",
-            "Bloom Living Service Center (Plot C13, Zayed City)",
-        ],
-    )
+    project_name = st.selectbox("Select Project:", [
+        "Bloom Living – Almeria (Residential Villas)",
+        "Bloom Living – Cordoba Community Center",
+        "Bloom Living – Toledo Community Center",
+        "Bloom Living Service Center (Plot C13, Zayed City)",
+    ])
     st.markdown("---")
     st.markdown("**📋 Quick Topics:**")
-    quick_topics = [
-        "Fire Prevention",
-        "Working at Heights",
-        "Excavation Works",
-        "Crane Operations",
-        "Electrical Works",
-        "Confined Space Entry",
-        "Heat Stress Management",
-        "Night Shift Work",
-        "Chemical Handling",
-        "Scaffolding Erection",
-        "Concrete Works",
-        "Lifting Operations",
-    ]
-    for topic in quick_topics:
-        if st.button(f"📄 {topic}", key=f"btn_{topic}",
+    for topic in [
+        "Fire Prevention", "Working at Heights", "Excavation Works",
+        "Crane Operations", "Electrical Works", "Confined Space Entry",
+        "Heat Stress Management", "Night Shift Work", "Chemical Handling",
+        "Scaffolding Erection", "Concrete Works", "Lifting Operations"
+    ]:
+        if st.button(f"📄 {topic}", key=f"q_{topic}",
                      use_container_width=True):
             st.session_state.quick_input = topic
 
-# ── MAIN TABS ──
+# ── TABS ──
 tab1, tab2 = st.tabs(["✏️ Type a Topic", "📎 Upload PDF / DOCX"])
 
-# ── TAB 1 ──
 with tab1:
-    st.info(
-        "Type any construction activity → "
-        "Click Generate → Download DOCX"
-    )
+    st.info("Type any construction activity → Click Generate → Download DOCX")
     user_input = st.text_input(
         "🔍 Enter Activity / Topic:",
         value=st.session_state.get("quick_input", ""),
-        placeholder="e.g. Scaffolding Erection, Lifting Operations...",
+        placeholder="e.g. Lifting Operations, Scaffolding Erection..."
     )
-
-    if st.button(
-        "🚀 Generate Risk Assessment",
-        type="primary",
-        use_container_width=True,
-        key="gen_tab1",
-    ):
+    if st.button("🚀 Generate Risk Assessment", type="primary",
+                 use_container_width=True, key="g1"):
         if not user_input.strip():
             st.warning("Please enter a topic first.")
         else:
-            with st.spinner(f"⏳ Generating RA for: {user_input} ..."):
-                try:
-                    prompt = (
-                        f"Generate a complete Risk Assessment for: {user_input}\n"
-                        f"Project: {project_name}\n"
-                        f"Location: Abu Dhabi UAE\n"
-                        f"Season: Summer. Include heat stress controls."
-                    )
-                    ra_data = call_claude_api(prompt)
-                    show_results(ra_data, project_name, user_input)
-                except json.JSONDecodeError:
-                    st.error("⚠️ Parse error — please click Generate again.")
-                except Exception as e:
-                    st.error(f"❌ Error: {str(e)}")
+            with st.spinner(f"⏳ Generating RA for: {user_input}..."):
+                call_api_and_show(
+                    f"Generate Risk Assessment for: {user_input}\n"
+                    f"Project: {project_name}\nLocation: Abu Dhabi UAE\n"
+                    f"Season: Summer. Include heat stress controls.",
+                    project_name, user_input
+                )
 
-# ── TAB 2 ──
 with tab2:
-    st.info(
-        "Upload a PDF or DOCX → "
-        "Bot reads it → Generates RA automatically"
-    )
-    uploaded_file = st.file_uploader(
-        "Choose file:",
-        type=["pdf", "docx", "doc"],
-        help="Method Statement, existing RA, or work procedure",
-    )
-
-    if uploaded_file:
-        file_size = len(uploaded_file.getvalue()) / 1024
-        st.success(f"✅ {uploaded_file.name} ({file_size:.1f} KB)")
-
-        extra = st.text_area(
-            "Additional instructions (optional):",
-            placeholder="e.g. Focus on excavation only, add 10 rows...",
-            height=70,
-        )
-
-        if st.button(
-            "🚀 Generate RA from File",
-            type="primary",
-            use_container_width=True,
-            key="gen_tab2",
-        ):
-            with st.spinner("📖 Reading file and generating RA..."):
-                uploaded_file.seek(0)
-
-                if uploaded_file.name.lower().endswith(".pdf"):
-                    file_text, pages = read_pdf_file(uploaded_file)
-                    label = f"PDF ({pages} pages)"
+    st.info("Upload PDF or DOCX → Bot reads it → Generates RA")
+    uf = st.file_uploader("Choose file:", type=["pdf", "docx", "doc"])
+    if uf:
+        st.success(f"✅ {uf.name} ({len(uf.getvalue())/1024:.1f} KB)")
+        extra = st.text_area("Extra instructions:", height=60)
+        if st.button("🚀 Generate RA from File", type="primary",
+                     use_container_width=True, key="g2"):
+            with st.spinner("Reading file..."):
+                uf.seek(0)
+                if uf.name.lower().endswith(".pdf"):
+                    txt, pg = read_pdf_file(uf)
                 else:
-                    file_text, _ = read_docx_file(uploaded_file)
-                    label = "DOCX"
-
-                if "ERROR" in str(file_text):
-                    st.error(f"Cannot read file: {file_text}")
+                    txt, pg = read_docx_file(uf)
+                if "ERROR" in str(txt):
+                    st.error(txt)
                 else:
-                    st.success(f"✅ File read: {label}")
-                    topic_name = (
-                        uploaded_file.name.rsplit(".", 1)[0]
-                        .replace("_", " ")
+                    tname = uf.name.rsplit(".", 1)[0].replace("_", " ")
+                    call_api_and_show(
+                        f"Generate Risk Assessment from this document.\n"
+                        f"Project: {project_name}\nLocation: Abu Dhabi UAE\n"
+                        f"Season: Summer.\nDocument:\n{txt}\n"
+                        f"{'Instructions: '+extra if extra else ''}",
+                        project_name, tname
                     )
-                    prompt = (
-                        f"Analyze this document and generate a complete "
-                        f"ADOSH-SF Risk Assessment for all activities.\n"
-                        f"Project: {project_name}\n"
-                        f"Location: Abu Dhabi UAE\n"
-                        f"Season: Summer. Include heat stress controls.\n"
-                        f"Document:\n{file_text}\n"
-                        f"{'Instructions: ' + extra if extra else ''}"
-                    )
-                    try:
-                        ra_data = call_claude_api(prompt)
-                        show_results(ra_data, project_name, topic_name)
-                    except json.JSONDecodeError:
-                        st.error("⚠️ Parse error — please try again.")
-                    except Exception as e:
-                        st.error(f"❌ Error: {str(e)}")
 
 st.markdown("---")
-st.caption(
-    "⚠️ AI output must be reviewed by a competent HSE professional. "
-    "| ADOSH-SF Version 4.0 | © ENGC 2026"
-)
+st.caption("⚠️ AI output must be reviewed by a competent HSE professional. "
+           "| ADOSH-SF Version 4.0 | © ENGC 2026")
